@@ -4,7 +4,15 @@ import { readState, writeState } from '../lib/supabase.mjs';
 export async function GET(request) {
   if (!isMasterRequest(request)) return json({ error: 'Sessão não autenticada.' }, 401);
   try { return json({ state: await readState() }); }
-  catch (error) { console.error('state.GET', error); return json({ error: 'Não foi possível carregar os dados do Supabase.' }, 503); }
+  catch (error) {
+    console.error('state.GET', error);
+    const invalidKey = String(error?.message || '').includes('Supabase GET 401');
+    return json({
+      error: invalidKey
+        ? 'A chave do Supabase configurada na Vercel é inválida. Atualize SUPABASE_SECRET_KEY e publique novamente.'
+        : 'Não foi possível carregar os dados do Supabase.',
+    }, 503);
+  }
 }
 
 export async function PUT(request) {

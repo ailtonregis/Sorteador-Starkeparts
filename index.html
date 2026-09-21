@@ -508,7 +508,13 @@ const App={
       await loadState();
       log('LOGIN','user',masterUser.id,`${masterUser.name} entrou no painel.`); save();
       $('#lg-pass').value=''; route();
-    }catch(e){ err.textContent='Não foi possível acessar o servidor. Tente novamente.'; err.classList.remove('hidden'); }
+    }catch(e){
+      masterUser=null;
+      err.textContent=e instanceof Error&&e.message
+        ? e.message
+        : 'Não foi possível acessar o servidor. Tente novamente.';
+      err.classList.remove('hidden');
+    }
   },
   async logout(){ const u=sessUser(); if(u){ log('LOGOUT','user',u.id,`${u.name} saiu do painel.`); save(); await flushState(); }
     try{ await fetch('/api/auth',{method:'DELETE'}); }catch(e){}

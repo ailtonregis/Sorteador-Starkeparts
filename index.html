@@ -119,7 +119,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:680px}
 #ov .ov-camp b{color:var(--text)}
 .spin-txt{font-size:clamp(44px,10vw,110px);font-weight:900;letter-spacing:.08em;color:var(--yellow);font-variant-numeric:tabular-nums;min-height:1.15em;text-shadow:0 0 44px rgba(246,212,44,.5)}
 .spin-txt.reveal{color:#fff;animation:pop .55s cubic-bezier(.2,1.6,.4,1)}
+.countdown-label{font-size:12px;letter-spacing:.32em;text-transform:uppercase;color:var(--mut);font-weight:900}
+.spin-txt.countdown-pop{animation:countdownPop .72s cubic-bezier(.2,1.25,.4,1)}
 @keyframes pop{from{transform:scale(.55);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes countdownPop{0%{transform:scale(.45);opacity:0}35%{transform:scale(1.18);opacity:1}100%{transform:scale(1);opacity:.88}}
 .winner-card{background:rgba(16,19,22,.9);border:2px solid var(--yellow);border-radius:18px;padding:26px 40px;box-shadow:0 0 70px rgba(246,212,44,.28);animation:pop .55s cubic-bezier(.2,1.6,.4,1)}
 .winner-card .wc-label{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--mut);font-weight:800}
 .winner-card .wc-num{font-size:clamp(40px,8vw,84px);font-weight:900;color:var(--yellow);letter-spacing:.06em;font-variant-numeric:tabular-nums;line-height:1.1;text-shadow:0 0 34px rgba(246,212,44,.45)}
@@ -849,21 +852,30 @@ const App={
       snapshotHash:camp.snapshot?camp.snapshot.hash:'',snapshot:snap.length<=20000?snap:null,mode:'oficial'};
     S.draws.unshift(draw); sale.drawId=draw.id; camp.updatedAt=Date.now();
     log('SORTEIO OFICIAL','draw',draw.id,`${camp.name} · ${order}º sorteio · número ${draw.acquisition} → ${cust.name} (${cust.code}) · pool ${list.length}`);
-    save(); confetti([camp.theme?camp.theme.colorPrimary:'#f6d42c','#e8394a','#ffffff']);
+    save();
     App.ovWinner(draw,camp,false); App.refresh();
   },
   animate(camp,opts,list,sale,cust){
     return new Promise(res=>{
       ovBusy=true; App.ovOpen(camp,opts.test);
       const body=$('#ov-body');
-      body.innerHTML=`<div class="spin-txt" id="ov-spin">—</div>`;
+      body.innerHTML=`<div class="countdown-label" id="ov-countdown-label">O sorteio começa em</div>
+        <div class="spin-txt" id="ov-spin">10</div>`;
       $('#ov-actions').innerHTML='';
-      const sp=$('#ov-spin'); const displays=list.slice(0,400).map(s=>esc(s.acquisition));
-      const dur=5200,t0=performance.now(); let last=0;
-      (function tick(now){ const t=now-t0,p=Math.min(1,t/dur),iv=55+950*Math.pow(p,3);
-        if(now-last>=iv){ last=now; sp.textContent=displays[Math.floor(Math.random()*displays.length)]||'—'; }
-        if(p<1) requestAnimationFrame(tick);
-        else { sp.textContent=normAcq(sale.acquisition); sp.classList.add('reveal'); ovBusy=false; setTimeout(res,1000); } })(t0);
+      const sp=$('#ov-spin'); let remaining=10;
+      const pulse=()=>{ sp.classList.remove('countdown-pop'); void sp.offsetWidth; sp.classList.add('countdown-pop'); };
+      pulse();
+      const timer=setInterval(()=>{
+        remaining--;
+        if(remaining>0){ sp.textContent=remaining; pulse(); return; }
+        clearInterval(timer);
+        const label=$('#ov-countdown-label'); if(label) label.textContent='Número sorteado';
+        sp.textContent=normAcq(sale.acquisition);
+        sp.className='spin-txt reveal';
+        confetti([camp.theme?camp.theme.colorPrimary:'#f6d42c','#e8394a','#ffffff']);
+        ovBusy=false;
+        setTimeout(res,1500);
+      },1000);
     });
   },
   ovOpen(camp,test){

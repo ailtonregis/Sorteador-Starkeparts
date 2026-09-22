@@ -292,6 +292,30 @@ function parseCSV(text){
   if(field!==''||row.length){ row.push(field); rows.push(row); }
   return rows.filter(r=>r.some(c=>c.trim()!==''));
 }
+const importHeader = value=>String(value??'').trim().toLowerCase().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+function importNumber(value){
+  let raw=String(value??'').trim().replace(/\s/g,'').replace(/^R\$/i,'');
+  if(raw.includes(',')) raw=raw.replace(/\./g,'').replace(',','.');
+  const number=Number(raw||'0');
+  return Number.isFinite(number)?number:NaN;
+}
+function importDate(value){
+  const raw=String(value??'').trim();
+  const br=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(br) return `${br[3]}-${br[2].padStart(2,'0')}-${br[1].padStart(2,'0')}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw)?raw:'';
+}
+function splitCodeName(value){
+  const raw=String(value??'').trim();
+  const match=raw.match(/^([^\s-]+)\s*-\s*(.+)$/);
+  return match?{code:match[1].trim(),name:match[2].trim()}:{code:raw,name:''};
+}
+function ignoredSeller(value){
+  const name=(splitCodeName(value).name||String(value??'')).normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').trim().toUpperCase();
+  return name==='WEB VENDAS'||name==='SARA';
+}
 function toast(msg,type=''){ const t=document.createElement('div'); t.className='toast '+type; t.textContent=msg; $('#toasts').appendChild(t); setTimeout(()=>t.remove(),4600); }
 function openModal(title,bodyHTML,footHTML=''){ $('#modal-root').innerHTML =
   `<div class="modal-back" onclick="if(event.target===this)App.closeModal()"><div class="modal"><h3>${esc(title)}</h3><div class="modal-body">${bodyHTML}</div>${footHTML?`<div class="modal-foot">${footHTML}</div>`:''}</div></div>`; }
@@ -915,9 +939,9 @@ const App={
   importSalesModal(){
     const camp=activeCampaign();
     openModal('Importar vendas (CSV)',`
-      <p class="mut">As vendas entram na <b>campanha ativa</b> ${camp?`(<b style="color:var(--text)">${esc(camp.name)}</b>)`:''} passando pelas <b>mesmas validações</b> da venda manual (cliente existe, campanha em andamento, data no período, aquisição única, valor válido).</p>
+      <p class="mut">As vendas entram na <b>campanha ativa</b> ${camp?`(<b style="color:var(--text)">${esc(camp.name)}</b>)`:''}. A planilha do relatório comercial e o modelo abaixo são aceitos.</p>
       <code style="display:block;background:var(--card2);padding:10px;border-radius:8px;margin-top:8px;font-size:12px;word-break:break-all">codigo_cliente;aquisicao;valor;data;vendedor;filial;obs</code>
-      <p class="mut mt-s">O cabeçalho acima é obrigatório. Somente essas colunas serão importadas; colunas adicionais serão ignoradas.</p>
+      <p class="mut mt-s">No relatório, serão lidas somente: <b>Emissão, Requisição, Cliente, Vlr.Total e Vendedor</b>. As demais colunas serão ignoradas. Linhas da mesma requisição terão seus valores somados. Vendas de <b>WEB VENDAS</b> e <b>SARA</b> não serão computadas.</p>
       <div class="row mt"><button class="btn btn-sm" onclick="App.salesTemplate()">⬇ Baixar modelo</button>
         <button class="btn btn-y" onclick="$('#imp-sales-file').click()">📄 Selecionar CSV</button>
         <input type="file" id="imp-sales-file" accept=".csv,text/csv,text/plain" class="hidden" onchange="App.importSalesFile(this)"></div>`,
@@ -931,32 +955,57 @@ const App={
     const camp=activeCampaign();
     if(!camp||camp.status!=='andamento') return toast('Campanha encerrada para novas vendas.','err');
     const rows=parseCSV(text); if(!rows.length) return toast('Arquivo vazio.','err');
-    const head=rows[0].map(h=>h.trim().toLowerCase());
-    const allowed=['codigo_cliente','aquisicao','valor','data','vendedor','filial','obs'];
-    const missing=allowed.filter(column=>!head.includes(column));
-    if(missing.length) return toast('Cabeçalho inválido. Coluna(s) obrigatória(s): '+missing.join(', ')+'.','err');
-    const ix={code:head.indexOf('codigo_cliente'),acq:head.indexOf('aquisicao'),val:head.indexOf('valor'),
-      date:head.indexOf('data'),seller:head.indexOf('vendedor'),branch:head.indexOf('filial'),obs:head.indexOf('obs')};
-    const body=rows.slice(1);
-    let ok=0; const errs=[]; const u=sessUser();
-    body.forEach((r,li)=>{
+    const head=rows[0].map(importHeader);
+    const report=head.includes('emissao')&&head.includes('requisicao')&&head.includes('cliente')&&head.includes('vlr_total');
+    const template=['codigo_cliente','aquisicao','valor','data','vendedor','filial','obs'].every(column=>head.includes(column));
+    if(!report&&!template) return toast('Cabeçalho não reconhecido. Use o relatório comercial ou baixe o modelo de importação.','err');
+    const ix=report
+      ?{client:head.indexOf('cliente'),acq:head.indexOf('requisicao'),val:head.indexOf('vlr_total'),date:head.indexOf('emissao'),
+        seller:head.indexOf('vendedor'),uf:head.indexOf('uf'),city:head.indexOf('cidade'),branch:-1,obs:-1}
+      :{client:head.indexOf('codigo_cliente'),acq:head.indexOf('aquisicao'),val:head.indexOf('valor'),date:head.indexOf('data'),
+        seller:head.indexOf('vendedor'),uf:-1,city:-1,branch:head.indexOf('filial'),obs:head.indexOf('obs')};
+    const grouped=new Map(); let ignoredRows=0;
+    rows.slice(1).forEach((r,li)=>{
       const g=i=>i>=0&&i<r.length?String(r[i]||'').trim():'';
-      const code=g(ix.code).toUpperCase(), acq=normAcq(g(ix.acq));
+      if(ignoredSeller(g(ix.seller))){ ignoredRows++; return; }
+      const client=splitCodeName(g(ix.client)), code=client.code.toUpperCase(), acq=normAcq(g(ix.acq));
       if(!code&&!acq) return;
-      const cust=S.customers.find(c=>c.code.toUpperCase()===code);
-      const valRaw=g(ix.val);
-      const val=valRaw.includes(',')?Number(valRaw.replace(/\./g,'').replace(',','.')):Number(valRaw||'0');
-      const e=validateSale({campaignId:camp.id,customerId:cust?cust.id:null,acquisition:acq,value:isNaN(val)?-1:val,date:g(ix.date)||today()});
-      if(e.length){ errs.push(`Linha ${li+2}: ${e[0]==='DUP_ACQ'?'aquisição '+acq+' já cadastrada':e[0]}`); return; }
-      S.sales.unshift({id:uid(),campaignId:camp.id,customerId:cust.id,acquisition:acq,value:val,date:g(ix.date)||today(),
-        seller:g(ix.seller),branch:g(ix.branch),note:g(ix.obs),status:'valida',cancel:null,drawId:null,
+      const seller=splitCodeName(g(ix.seller)).name||g(ix.seller);
+      const item={line:li+2,code,name:client.name,acq,value:importNumber(g(ix.val)),date:importDate(g(ix.date)),seller,
+        uf:g(ix.uf).toUpperCase(),city:g(ix.city),branch:g(ix.branch),obs:g(ix.obs)};
+      if(!grouped.has(acq)) grouped.set(acq,item);
+      else {
+        const current=grouped.get(acq);
+        current.value+=item.value;
+        if(!current.name) current.name=item.name;
+      }
+    });
+    let ok=0,createdCustomers=0; const errs=[]; const u=sessUser();
+    grouped.forEach(item=>{
+      let cust=S.customers.find(c=>c.code.toUpperCase()===item.code);
+      let customerCreated=false;
+      if(!cust&&report&&item.code&&item.name){
+        cust={id:uid(),code:item.code,name:item.name,phone:'',uf:item.uf,city:item.city,createdAt:Date.now()};
+        S.customers.push(cust); customerCreated=true;
+      }
+      const e=validateSale({campaignId:camp.id,customerId:cust?cust.id:null,acquisition:item.acq,
+        value:Number.isFinite(item.value)?item.value:-1,date:item.date});
+      if(e.length){
+        if(customerCreated) S.customers=S.customers.filter(c=>c.id!==cust.id);
+        errs.push(`Linha ${item.line}: ${e[0]==='DUP_ACQ'?'aquisição '+item.acq+' já cadastrada':e[0]}`); return;
+      }
+      if(customerCreated) createdCustomers++;
+      S.sales.unshift({id:uid(),campaignId:camp.id,customerId:cust.id,acquisition:item.acq,value:item.value,date:item.date,
+        seller:item.seller,branch:item.branch,note:item.obs,status:'valida',cancel:null,drawId:null,
         createdAt:Date.now(),createdBy:u.id,createdByName:u.name+' (importação CSV)'});
       ok++; });
-    if(ok){ camp.updatedAt=Date.now(); log('VENDA CADASTRADA','campaign',camp.id,`Importação CSV: ${ok} venda(s) na campanha ${camp.name}.`); save(); }
+    if(ok||createdCustomers){ camp.updatedAt=Date.now(); log('VENDA CADASTRADA','campaign',camp.id,`Importação CSV: ${ok} venda(s) e ${createdCustomers} cliente(s) novo(s) na campanha ${camp.name}.`); save(); }
     App.refresh();
     openModal('Resultado da importação',`
       <div class="stats"><div class="stat"><div class="v">${ok}</div><div class="l">Vendas registradas</div></div>
-      <div class="stat red"><div class="v">${errs.length}</div><div class="l">Linhas recusadas</div></div></div>
+      <div class="stat"><div class="v">${createdCustomers}</div><div class="l">Clientes criados</div></div>
+      <div class="stat"><div class="v">${ignoredRows}</div><div class="l">Linhas de WEB VENDAS/SARA ignoradas</div></div>
+      <div class="stat red"><div class="v">${errs.length}</div><div class="l">Requisições recusadas</div></div></div>
       ${errs.length?`<div class="card mt" style="box-shadow:none"><b style="color:var(--red)">Recusas:</b><div class="mut mt-s">${errs.slice(0,12).map(esc).join('<br>')}</div></div>`:''}
       ${ok?'<p class="mut mt-s">Cada venda registrada gerou 1 número da sorte = número da aquisição.</p>':''}`,
       '<button class="btn btn-y" onclick="App.closeModal()">Ok</button>');

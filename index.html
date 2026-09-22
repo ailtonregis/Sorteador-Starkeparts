@@ -398,7 +398,7 @@ function dateInPeriod(camp,dateStr){
   return true;
 }
 /* Validação centralizada de venda (usada pela UI e pela importação) */
-function validateSale({campaignId,customerId,acquisition,value,date,allowOutsidePeriod=false}){
+function validateSale({campaignId,customerId,acquisition,value,date,allowOutsidePeriod=false,existingSaleId=null}){
   const errs=[];
   const camp=byId(S.campaigns,campaignId);
   if(!camp) errs.push('Campanha inexistente.');
@@ -410,7 +410,7 @@ function validateSale({campaignId,customerId,acquisition,value,date,allowOutside
   if(!cust) errs.push('Cliente não localizado.');
   if(!normAcq(acquisition)) errs.push('Número da aquisição é obrigatório.');
   else if(!isValidAcq(acquisition)) errs.push('Aquisição inválida: use apenas números (ex.: 154287).');
-  else if(camp&&findSaleByAcq(camp.id,acquisition)) errs.push('DUP_ACQ');
+  else if(camp&&S.sales.some(s=>s.campaignId===camp.id&&s.id!==existingSaleId&&normAcq(s.acquisition)===normAcq(acquisition))) errs.push('DUP_ACQ');
   const v=Number(value);
   if(!(v>=0)) errs.push('Valor da venda inválido.');
   if(!date) errs.push('Data da compra é obrigatória.');
@@ -980,8 +980,9 @@ const App={
         if(!current.name) current.name=item.name;
       }
     });
-    let ok=0,createdCustomers=0; const errs=[]; const u=sessUser();
+    let ok=0,updated=0,createdCustomers=0; const errs=[]; const u=sessUser();
     grouped.forEach(item=>{
+      const existing=findSaleByAcq(camp.id,item.acq);
       let cust=S.customers.find(c=>c.code.toUpperCase()===item.code);
       let customerCreated=false;
       if(!cust&&report&&item.code&&item.name){
@@ -989,20 +990,31 @@ const App={
         S.customers.push(cust); customerCreated=true;
       }
       const e=validateSale({campaignId:camp.id,customerId:cust?cust.id:null,acquisition:item.acq,
-        value:Number.isFinite(item.value)?item.value:-1,date:item.date,allowOutsidePeriod:true});
+        value:Number.isFinite(item.value)?item.value:-1,date:item.date,allowOutsidePeriod:true,existingSaleId:existing?existing.id:null});
       if(e.length){
         if(customerCreated) S.customers=S.customers.filter(c=>c.id!==cust.id);
         errs.push(`Linha ${item.line}: ${e[0]==='DUP_ACQ'?'aquisição '+item.acq+' já cadastrada':e[0]}`); return;
+      }
+      if(existing){
+        if(existing.drawId){
+          if(customerCreated) S.customers=S.customers.filter(c=>c.id!==cust.id);
+          errs.push(`Linha ${item.line}: aquisição ${item.acq} protegida por sorteio oficial.`); return;
+        }
+        if(customerCreated) createdCustomers++;
+        Object.assign(existing,{customerId:cust.id,value:item.value,date:item.date,seller:item.seller,branch:item.branch,note:item.obs,
+          updatedAt:Date.now(),updatedBy:u.id,updatedByName:u.name+' (importação CSV)'});
+        updated++; return;
       }
       if(customerCreated) createdCustomers++;
       S.sales.unshift({id:uid(),campaignId:camp.id,customerId:cust.id,acquisition:item.acq,value:item.value,date:item.date,
         seller:item.seller,branch:item.branch,note:item.obs,status:'valida',cancel:null,drawId:null,
         createdAt:Date.now(),createdBy:u.id,createdByName:u.name+' (importação CSV)'});
       ok++; });
-    if(ok||createdCustomers){ camp.updatedAt=Date.now(); log('VENDA CADASTRADA','campaign',camp.id,`Importação CSV: ${ok} venda(s) e ${createdCustomers} cliente(s) novo(s) na campanha ${camp.name}.`); save(); }
+    if(ok||updated||createdCustomers){ camp.updatedAt=Date.now(); log('IMPORTAÇÃO DE VENDAS','campaign',camp.id,`Importação CSV: ${ok} nova(s), ${updated} atualizada(s) e ${createdCustomers} cliente(s) novo(s) na campanha ${camp.name}.`); save(); }
     App.refresh();
     openModal('Resultado da importação',`
       <div class="stats"><div class="stat"><div class="v">${ok}</div><div class="l">Vendas registradas</div></div>
+      <div class="stat"><div class="v">${updated}</div><div class="l">Vendas atualizadas</div></div>
       <div class="stat"><div class="v">${createdCustomers}</div><div class="l">Clientes criados</div></div>
       <div class="stat"><div class="v">${ignoredRows}</div><div class="l">Linhas de WEB VENDAS/SARA ignoradas</div></div>
       <div class="stat red"><div class="v">${errs.length}</div><div class="l">Requisições recusadas</div></div></div>

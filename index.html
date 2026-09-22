@@ -917,6 +917,7 @@ const App={
     openModal('Importar vendas (CSV)',`
       <p class="mut">As vendas entram na <b>campanha ativa</b> ${camp?`(<b style="color:var(--text)">${esc(camp.name)}</b>)`:''} passando pelas <b>mesmas validações</b> da venda manual (cliente existe, campanha em andamento, data no período, aquisição única, valor válido).</p>
       <code style="display:block;background:var(--card2);padding:10px;border-radius:8px;margin-top:8px;font-size:12px;word-break:break-all">codigo_cliente;aquisicao;valor;data;vendedor;filial;obs</code>
+      <p class="mut mt-s">O cabeçalho acima é obrigatório. Somente essas colunas serão importadas; colunas adicionais serão ignoradas.</p>
       <div class="row mt"><button class="btn btn-sm" onclick="App.salesTemplate()">⬇ Baixar modelo</button>
         <button class="btn btn-y" onclick="$('#imp-sales-file').click()">📄 Selecionar CSV</button>
         <input type="file" id="imp-sales-file" accept=".csv,text/csv,text/plain" class="hidden" onchange="App.importSalesFile(this)"></div>`,
@@ -931,17 +932,15 @@ const App={
     if(!camp||camp.status!=='andamento') return toast('Campanha encerrada para novas vendas.','err');
     const rows=parseCSV(text); if(!rows.length) return toast('Arquivo vazio.','err');
     const head=rows[0].map(h=>h.trim().toLowerCase());
-    const hasHeader=head.includes('codigo_cliente')||head.includes('aquisicao');
-    const ix=hasHeader?{code:head.indexOf('codigo_cliente'),acq:head.indexOf('aquisicao'),val:head.indexOf('valor'),
-        date:head.indexOf('data'),seller:head.indexOf('seller')>=0?head.indexOf('seller'):head.indexOf('vendedor'),
-        branch:head.indexOf('filial'),obs:head.indexOf('obs'),status:head.indexOf('status')}
-      :{code:0,acq:1,val:2,date:3,seller:4,branch:5,obs:6,status:-1};
-    if(ix.code<0||ix.acq<0) return toast('Cabeçalho não reconhecido. Use: codigo_cliente;aquisicao;valor;data;vendedor;filial;obs','err');
-    const body=hasHeader?rows.slice(1):rows;
-    let ok=0,skip=0; const errs=[]; const u=sessUser();
+    const allowed=['codigo_cliente','aquisicao','valor','data','vendedor','filial','obs'];
+    const missing=allowed.filter(column=>!head.includes(column));
+    if(missing.length) return toast('Cabeçalho inválido. Coluna(s) obrigatória(s): '+missing.join(', ')+'.','err');
+    const ix={code:head.indexOf('codigo_cliente'),acq:head.indexOf('aquisicao'),val:head.indexOf('valor'),
+      date:head.indexOf('data'),seller:head.indexOf('vendedor'),branch:head.indexOf('filial'),obs:head.indexOf('obs')};
+    const body=rows.slice(1);
+    let ok=0; const errs=[]; const u=sessUser();
     body.forEach((r,li)=>{
       const g=i=>i>=0&&i<r.length?String(r[i]||'').trim():'';
-      if(ix.status>=0&&g(ix.status).toLowerCase()==='cancelada'){ skip++; return; }
       const code=g(ix.code).toUpperCase(), acq=normAcq(g(ix.acq));
       if(!code&&!acq) return;
       const cust=S.customers.find(c=>c.code.toUpperCase()===code);
@@ -957,8 +956,7 @@ const App={
     App.refresh();
     openModal('Resultado da importação',`
       <div class="stats"><div class="stat"><div class="v">${ok}</div><div class="l">Vendas registradas</div></div>
-      <div class="stat red"><div class="v">${errs.length}</div><div class="l">Linhas recusadas</div></div>
-      <div class="stat"><div class="v">${skip}</div><div class="l">Canceladas ignoradas</div></div></div>
+      <div class="stat red"><div class="v">${errs.length}</div><div class="l">Linhas recusadas</div></div></div>
       ${errs.length?`<div class="card mt" style="box-shadow:none"><b style="color:var(--red)">Recusas:</b><div class="mut mt-s">${errs.slice(0,12).map(esc).join('<br>')}</div></div>`:''}
       ${ok?'<p class="mut mt-s">Cada venda registrada gerou 1 número da sorte = número da aquisição.</p>':''}`,
       '<button class="btn btn-y" onclick="App.closeModal()">Ok</button>');

@@ -940,14 +940,14 @@ const App={
     const camp=activeCampaign();
     openModal('Importar vendas (CSV)',`
       <p class="mut">As vendas entram na <b>campanha ativa</b> ${camp?`(<b style="color:var(--text)">${esc(camp.name)}</b>)`:''}. A planilha do relatório comercial e o modelo abaixo são aceitos. A data original da venda será mantida mesmo quando estiver fora do período cadastrado da campanha.</p>
-      <code style="display:block;background:var(--card2);padding:10px;border-radius:8px;margin-top:8px;font-size:12px;word-break:break-all">codigo_cliente;aquisicao;valor;data;vendedor;filial;obs</code>
+      <code style="display:block;background:var(--card2);padding:10px;border-radius:8px;margin-top:8px;font-size:12px;word-break:break-all">codigo_cliente;aquisicao;valor;data;vendedor</code>
       <p class="mut mt-s">No relatório, serão lidas somente: <b>Emissão, Requisição, Cliente, Vlr.Total e Vendedor</b>. As demais colunas serão ignoradas. Linhas da mesma requisição terão seus valores somados. Vendas de <b>WEB VENDAS</b> e <b>SARA</b> não serão computadas.</p>
       <div class="row mt"><button class="btn btn-sm" onclick="App.salesTemplate()">⬇ Baixar modelo</button>
         <button class="btn btn-y" onclick="$('#imp-sales-file').click()">📄 Selecionar CSV</button>
         <input type="file" id="imp-sales-file" accept=".csv,text/csv,text/plain" class="hidden" onchange="App.importSalesFile(this)"></div>`,
       '<button class="btn btn-ghost" onclick="App.closeModal()">Fechar</button>');
   },
-  salesTemplate(){ download('modelo-vendas.csv','\ufeffcodigo_cliente;aquisicao;valor;data;vendedor;filial;obs\r\n001254;154287;150,00;'+today()+';Carlos;Matriz;pedido #10\r\n001254;154866;320,50;'+today()+';Carlos;Matriz;pedido #11\r\n','text/csv'); },
+  salesTemplate(){ download('modelo-vendas.csv','\ufeffcodigo_cliente;aquisicao;valor;data;vendedor\r\n001254;154287;150,00;'+today()+';Carlos\r\n001254;154866;320,50;'+today()+';Carlos\r\n','text/csv'); },
   importSalesFile(input){ const f=input.files[0]; if(!f) return; const r=new FileReader();
     r.onload=()=>{ try{ App.processSalesCSV(r.result); }catch(e){ console.warn(e); toast('Falha ao ler o CSV.','err'); } input.value=''; };
     r.readAsText(f,'utf-8'); },
@@ -957,13 +957,13 @@ const App={
     const rows=parseCSV(text); if(!rows.length) return toast('Arquivo vazio.','err');
     const head=rows[0].map(importHeader);
     const report=head.includes('emissao')&&head.includes('requisicao')&&head.includes('cliente')&&head.includes('vlr_total');
-    const template=['codigo_cliente','aquisicao','valor','data','vendedor','filial','obs'].every(column=>head.includes(column));
+    const template=['codigo_cliente','aquisicao','valor','data','vendedor'].every(column=>head.includes(column));
     if(!report&&!template) return toast('Cabeçalho não reconhecido. Use o relatório comercial ou baixe o modelo de importação.','err');
     const ix=report
       ?{client:head.indexOf('cliente'),acq:head.indexOf('requisicao'),val:head.indexOf('vlr_total'),date:head.indexOf('emissao'),
-        seller:head.indexOf('vendedor'),uf:head.indexOf('uf'),city:head.indexOf('cidade'),branch:-1,obs:-1}
+        seller:head.indexOf('vendedor')}
       :{client:head.indexOf('codigo_cliente'),acq:head.indexOf('aquisicao'),val:head.indexOf('valor'),date:head.indexOf('data'),
-        seller:head.indexOf('vendedor'),uf:-1,city:-1,branch:head.indexOf('filial'),obs:head.indexOf('obs')};
+        seller:head.indexOf('vendedor')};
     const grouped=new Map(); let ignoredRows=0;
     rows.slice(1).forEach((r,li)=>{
       const g=i=>i>=0&&i<r.length?String(r[i]||'').trim():'';
@@ -971,8 +971,7 @@ const App={
       const client=splitCodeName(g(ix.client)), code=client.code.toUpperCase(), acq=normAcq(g(ix.acq));
       if(!code&&!acq) return;
       const seller=splitCodeName(g(ix.seller)).name||g(ix.seller);
-      const item={line:li+2,code,name:client.name,acq,value:importNumber(g(ix.val)),date:importDate(g(ix.date)),seller,
-        uf:g(ix.uf).toUpperCase(),city:g(ix.city),branch:g(ix.branch),obs:g(ix.obs)};
+      const item={line:li+2,code,name:client.name,acq,value:importNumber(g(ix.val)),date:importDate(g(ix.date)),seller};
       if(!grouped.has(acq)) grouped.set(acq,item);
       else {
         const current=grouped.get(acq);
@@ -986,7 +985,7 @@ const App={
       let cust=S.customers.find(c=>c.code.toUpperCase()===item.code);
       let customerCreated=false;
       if(!cust&&report&&item.code&&item.name){
-        cust={id:uid(),code:item.code,name:item.name,phone:'',uf:item.uf,city:item.city,createdAt:Date.now()};
+        cust={id:uid(),code:item.code,name:item.name,phone:'',uf:'',city:'',createdAt:Date.now()};
         S.customers.push(cust); customerCreated=true;
       }
       const e=validateSale({campaignId:camp.id,customerId:cust?cust.id:null,acquisition:item.acq,
@@ -1001,13 +1000,13 @@ const App={
           errs.push(`Linha ${item.line}: aquisição ${item.acq} protegida por sorteio oficial.`); return;
         }
         if(customerCreated) createdCustomers++;
-        Object.assign(existing,{customerId:cust.id,value:item.value,date:item.date,seller:item.seller,branch:item.branch,note:item.obs,
+        Object.assign(existing,{customerId:cust.id,value:item.value,date:item.date,seller:item.seller,
           updatedAt:Date.now(),updatedBy:u.id,updatedByName:u.name+' (importação CSV)'});
         updated++; return;
       }
       if(customerCreated) createdCustomers++;
       S.sales.unshift({id:uid(),campaignId:camp.id,customerId:cust.id,acquisition:item.acq,value:item.value,date:item.date,
-        seller:item.seller,branch:item.branch,note:item.obs,status:'valida',cancel:null,drawId:null,
+        seller:item.seller,branch:'',note:'',status:'valida',cancel:null,drawId:null,
         createdAt:Date.now(),createdBy:u.id,createdByName:u.name+' (importação CSV)'});
       ok++; });
     if(ok||updated||createdCustomers){ camp.updatedAt=Date.now(); log('IMPORTAÇÃO DE VENDAS','campaign',camp.id,`Importação CSV: ${ok} nova(s), ${updated} atualizada(s) e ${createdCustomers} cliente(s) novo(s) na campanha ${camp.name}.`); save(); }

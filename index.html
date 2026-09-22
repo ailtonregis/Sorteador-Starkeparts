@@ -195,6 +195,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:680px}
     <button class="btn btn-y" style="width:100%" onclick="App.pubSearch()">Consultar</button>
     <div id="pub-result" class="mt"></div>
   </div>
+  <p class="mut mt center" id="pub-last-update" style="max-width:420px;font-size:12px"></p>
   <p class="mut mt center" style="max-width:420px;font-size:12px">Cada compra válida gera 1 número da sorte — o próprio número da aquisição. Consulta individual e privativa: nenhum dado de outros clientes é exibido.</p>
   <button class="btn btn-ghost btn-sm mt" onclick="location.hash='#/adm'">🔒 Acesso restrito à equipe</button>
 </div>
@@ -558,6 +559,7 @@ const App={
     let data;
     try{ const res=await fetch('/api/public?code='+encodeURIComponent(code)); data=await res.json(); if(!res.ok) throw new Error(data.error); }
     catch(e){ box.innerHTML='<div class="err-t center">Consulta temporariamente indisponível.</div>'; return; }
+    paintPublicLastUpdate(data.lastUpdated);
     const camp=data.campaign, result=data.result;
     if(!camp){ box.innerHTML='<div class="card mt center"><span class="chip chip-warn">Nenhuma campanha ativa no momento.</span></div>'; return; }
     if(!result){
@@ -1257,10 +1259,15 @@ function renderBak(){
 }
 /* ============================ ROTAS / INIT ============================ */
 function showView(id){ ['view-login','view-public','view-admin'].forEach(v=>$('#'+v).classList.toggle('hidden',v!==id)); }
+function paintPublicLastUpdate(timestamp){
+  const el=$('#pub-last-update');
+  el.textContent=timestamp ? `Última atualização dos resultados: ${dtBR(timestamp)}` : '';
+}
 async function paintPublic(){
   $('#pub-logo').src=LOGO_URL;
-  let camp=null;
-  try{ const res=await fetch('/api/public'); const data=await res.json(); if(res.ok) camp=data.campaign; }catch(e){}
+  let camp=null, lastUpdated=null;
+  try{ const res=await fetch('/api/public'); const data=await res.json(); if(res.ok){ camp=data.campaign; lastUpdated=data.lastUpdated; } }catch(e){}
+  paintPublicLastUpdate(lastUpdated);
   const cb=$('#pub-cobrand');
   cb.innerHTML=(camp&&camp.status!=='rascunho'&&(camp.supplier||(camp.theme&&camp.theme.logo)))
     ? `<span>Stärke Parts</span><span class="plus">+</span>${camp.theme&&camp.theme.logo?`<img src="${camp.theme.logo}" alt="">`:''}<span>${esc(camp.supplier||'')}</span>` : '';

@@ -1,5 +1,5 @@
 import { json } from '../lib/session.mjs';
-import { readState } from '../lib/supabase.mjs';
+import { readStateRecord } from '../lib/supabase.mjs';
 
 function activeCampaign(state) {
   return state.campaigns.find(item => item.id === state.settings.activeCampaignId && item.status !== 'rascunho') || null;
@@ -21,11 +21,11 @@ function campaignView(campaign) {
 
 export async function GET(request) {
   try {
-    const state = await readState();
+    const { state, updatedAt } = await readStateRecord();
     const campaign = activeCampaign(state);
     const code = new URL(request.url).searchParams.get('code')?.trim();
-    if (!code) return json({ campaign: campaignView(campaign) });
-    if (!campaign) return json({ campaign: null, result: null });
+    if (!code) return json({ campaign: campaignView(campaign), lastUpdated: updatedAt });
+    if (!campaign) return json({ campaign: null, result: null, lastUpdated: updatedAt });
 
     const customer = state.customers.find(item => String(item.code).toUpperCase() === code.toUpperCase());
     const sales = customer
@@ -33,6 +33,7 @@ export async function GET(request) {
       : [];
     return json({
       campaign: campaignView(campaign),
+      lastUpdated: updatedAt,
       result: customer && sales.length ? {
         customer: { name: customer.name, code: customer.code },
         participations: sales.map(item => ({ acquisition: item.acquisition, date: item.date })),

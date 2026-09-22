@@ -390,21 +390,13 @@ function findSaleByAcq(cid,acq){ return S.sales.find(s=>s.campaignId===cid&&norm
 function activeCampaign(){ return byId(S.campaigns,S.settings.activeCampaignId)||null; }
 function campaignOfficialDraws(cid){ return S.draws.filter(d=>d.campaignId===cid&&d.mode==='oficial'); }
 function hasOfficialDraw(cid){ return campaignOfficialDraws(cid).length>0; }
-function dateInPeriod(camp,dateStr){
-  if(!camp.dateStart&&!camp.dateEnd) return true;
-  if(!dateStr) return false;
-  if(camp.dateStart&&dateStr<camp.dateStart) return false;
-  if(camp.dateEnd&&dateStr>camp.dateEnd) return false;
-  return true;
-}
 /* Validação centralizada de venda (usada pela UI e pela importação) */
-function validateSale({campaignId,customerId,acquisition,value,date,allowOutsidePeriod=false,existingSaleId=null}){
+function validateSale({campaignId,customerId,acquisition,value,date,existingSaleId=null}){
   const errs=[];
   const camp=byId(S.campaigns,campaignId);
   if(!camp) errs.push('Campanha inexistente.');
   else {
     if(camp.status!=='andamento') errs.push('Campanha encerrada para novas vendas.');
-    if(!allowOutsidePeriod&&!dateInPeriod(camp,date)) errs.push(`Compra fora do período da campanha (${dBR(camp.dateStart)} a ${dBR(camp.dateEnd)}).`);
   }
   const cust=byId(S.customers,customerId);
   if(!cust) errs.push('Cliente não localizado.');
@@ -939,7 +931,7 @@ const App={
   importSalesModal(){
     const camp=activeCampaign();
     openModal('Importar vendas (CSV)',`
-      <p class="mut">As vendas entram na <b>campanha ativa</b> ${camp?`(<b style="color:var(--text)">${esc(camp.name)}</b>)`:''}. A planilha do relatório comercial e o modelo abaixo são aceitos. A data original da venda será mantida mesmo quando estiver fora do período cadastrado da campanha.</p>
+      <p class="mut">As vendas entram na <b>campanha ativa</b> ${camp?`(<b style="color:var(--text)">${esc(camp.name)}</b>)`:''}. A planilha do relatório comercial e o modelo abaixo são aceitos. Vendas de qualquer período podem ser incluídas e sua data original será mantida.</p>
       <code style="display:block;background:var(--card2);padding:10px;border-radius:8px;margin-top:8px;font-size:12px;word-break:break-all">codigo_cliente;aquisicao;valor;data;vendedor</code>
       <p class="mut mt-s">No relatório, serão lidas somente: <b>Emissão, Requisição, Cliente, Vlr.Total e Vendedor</b>. As demais colunas serão ignoradas. Linhas da mesma requisição terão seus valores somados. Vendas de <b>WEB VENDAS</b> e <b>SARA</b> não serão computadas.</p>
       <div class="row mt"><button class="btn btn-sm" onclick="App.salesTemplate()">⬇ Baixar modelo</button>
@@ -989,7 +981,7 @@ const App={
         S.customers.push(cust); customerCreated=true;
       }
       const e=validateSale({campaignId:camp.id,customerId:cust?cust.id:null,acquisition:item.acq,
-        value:Number.isFinite(item.value)?item.value:-1,date:item.date,allowOutsidePeriod:true,existingSaleId:existing?existing.id:null});
+        value:Number.isFinite(item.value)?item.value:-1,date:item.date,existingSaleId:existing?existing.id:null});
       if(e.length){
         if(customerCreated) S.customers=S.customers.filter(c=>c.id!==cust.id);
         errs.push(`Linha ${item.line}: ${e[0]==='DUP_ACQ'?'aquisição '+item.acq+' já cadastrada':e[0]}`); return;
